@@ -1,21 +1,24 @@
 name: decdiff
 channels:
-- defaults
+- pytorch
 - conda-forge
+- defaults
 dependencies:
 - python=3.8
 - pip
 - patchelf
+- pytorch=1.10
+- cudatoolkit=11.3
 - pip:
-    - -f https://download.pytorch.org/whl/torch_stable.html
-    - numpy
-    - gym==0.18.0
-    - mujoco-py==2.0.2.13
+    - numpy==1.24
+    - setuptools<60.0
+    - gym<0.24.0
+    - cython<3 # for mujoco210 to work
+    - mujoco-py==2.1.*
     - matplotlib==3.3.4
-    - torch==1.9.1+cu111
     - typed-argument-parser
-    - git+https://github.com/rail-berkeley/d4rl@master#egg=d4rl
-    - scikit-image==0.17.2
+    - git+https://github.com/Farama-Foundation/d4rl@master#egg=d4rl
+    - scikit-image==0.21.0
     - scikit-video==1.1.11
     - gitpython
     - einops
@@ -27,6 +30,6 @@ dependencies:
     - jax <= 0.2.21
     - ray==1.9.1
     - crcmod # for fast gsutil rsync on large files
-    - ml_logger==0.8.69 
-    - jaynes==0.8.11 
-    - params_proto==2.9.6
+    - ml_logger==0.8.86
+    - jaynes==0.9.0
+    - params_proto==2.11.6

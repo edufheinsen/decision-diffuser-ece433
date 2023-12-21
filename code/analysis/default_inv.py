@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from params_proto.neo_hyper import Sweep
+from params_proto.hyper import Sweep
 
 from config.locomotion_config import Config
 from analysis import RUN

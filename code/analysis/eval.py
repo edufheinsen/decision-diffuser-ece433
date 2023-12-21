@@ -4,7 +4,7 @@ if __name__ == '__main__':
     import jaynes
     from scripts.evaluate_inv_parallel import evaluate
     from config.locomotion_config import Config
-    from params_proto.neo_hyper import Sweep
+    from params_proto.hyper import Sweep
 
     sweep = Sweep(RUN, Config).load("default_inv.jsonl")
 

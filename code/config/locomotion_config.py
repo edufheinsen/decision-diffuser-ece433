@@ -1,12 +1,12 @@
 import torch
 
-from params_proto.neo_proto import ParamsProto, PrefixProto, Proto
+from params_proto.proto import ParamsProto, PrefixProto, Proto
 
 class Config(ParamsProto):
     # misc
     seed = 100
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    bucket = '/home/aajay/weights/'
+    bucket = '/home/dbq/projects/weights/'
     dataset = 'hopper-medium-expert-v2'
 
     ## model
