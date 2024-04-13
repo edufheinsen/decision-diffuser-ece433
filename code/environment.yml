@@ -9,6 +9,7 @@ dependencies:
 - patchelf
 - pytorch=1.10
 - cudatoolkit=11.3
+- ipykernel
 - pip:
     - numpy==1.24
     - setuptools<60.0
