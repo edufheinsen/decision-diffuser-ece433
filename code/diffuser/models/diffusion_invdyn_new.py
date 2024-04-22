@@ -52,13 +52,28 @@ class GaussianDiffusion(nn.Module):
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
     ):
-        # TODO: Add inverse dynamics to the initialization
         super().__init__()
         self.horizon = horizon
         self.observation_dim = observation_dim
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+        
+        # Adding Inverse Dynamics
+        # Model takes in two states (s_t, s_{t+1}) and outputs the action 
+        # that led from s_t to s_{t+1}
+        # From the paper: "We represent the inverse dynamics fϕ with a 2-layered 
+        # MLP with 512 hidden units and ReLU activations"
+
+        hidden_size = 256 # Assume there are two hidden layers, each with 256 neurons
+        
+        self.inv_dyn_model = nn.Sequential(
+            nn.Linear(2*observation_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, action_dim),
+        )
 
         betas = cosine_beta_schedule(n_timesteps)
         alphas = 1. - betas
