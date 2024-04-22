@@ -24,8 +24,8 @@ Sample = namedtuple('Sample', 'trajectories values chains')
 
 
 @torch.no_grad()
-def default_sample_fn(model, x, cond, t):
-    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, t=t)
+def default_sample_fn(model, x, cond, returns, t):
+    model_mean, _, model_log_variance = model.p_mean_variance(x=x, cond=cond, returns=returns, t=t)
     model_std = torch.exp(0.5 * model_log_variance)
 
     # no noise when t == 0
@@ -52,7 +52,7 @@ class GaussianInvDynDiffusion(nn.Module):
     # TODO: pass the returns everywhere
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True, hidden_dim=256,
-        action_weight=1.0, loss_discount=1.0, loss_weights=None, returns_condition=False,
+        action_weight=1.0, loss_discount=1.0, loss_weights=None, returns_condition=True,
         condition_guidance_w=0.1, ar_inv=False, train_only_inv=False
     ):
         super().__init__()
@@ -62,7 +62,7 @@ class GaussianInvDynDiffusion(nn.Module):
         self.transition_dim = observation_dim + action_dim
         self.model = model
 
-        # Set all the instance variables Ajay et al. use
+        # Set all the instance variables Ajay et al. use (these aren't actually necessary at the moment, but we need the training script to run)
         self.hidden_dim = hidden_dim
         self.action_weight = action_weight
         self.loss_discount = loss_discount 
@@ -194,32 +194,32 @@ class GaussianInvDynDiffusion(nn.Module):
         return model_mean, posterior_variance, posterior_log_variance
 
     @torch.no_grad()
-    def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, **sample_kwargs):
+    def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, returns=None):
         device = self.betas.device
 
         batch_size = shape[0]
         x = torch.randn(shape, device=device)
-        x = apply_conditioning(x, cond, self.action_dim)
+        x = apply_conditioning(x, cond, 0) # TODO: figure out why this argument is set to zero and not action_dim in the original codebase
 
-        chain = [x] if return_chain else None
+        # chain = [x] if return_chain else None
 
         progress = utils.Progress(self.n_timesteps) if verbose else utils.Silent()
         for i in reversed(range(0, self.n_timesteps)):
             t = make_timesteps(batch_size, i, device)
-            x, values = sample_fn(self, x, cond, t, **sample_kwargs)
-            x = apply_conditioning(x, cond, self.action_dim)
+            x = sample_fn(self, x, cond, returns, t)
+            x = apply_conditioning(x, cond, 0)
 
-            progress.update({'t': i, 'vmin': values.min().item(), 'vmax': values.max().item()})
-            if return_chain: chain.append(x)
+            progress.update({'t': i})
+            # if return_chain: chain.append(x)
 
         progress.stamp()
 
-        x, values = sort_by_values(x, values)
-        if return_chain: chain = torch.stack(chain, dim=1)
-        return Sample(x, values, chain)
+        # x, values = sort_by_values(x, values)
+        # if return_chain: chain = torch.stack(chain, dim=1)
+        return x
 
     @torch.no_grad()
-    def conditional_sample(self, cond, horizon=None, **sample_kwargs):
+    def conditional_sample(self, cond, horizon=None, returns=None):
         '''
             conditions : [ (time, state), ... ]
         '''
@@ -230,7 +230,7 @@ class GaussianInvDynDiffusion(nn.Module):
         # shape = (batch_size, horizon, self.transition_dim)
         shape = (batch_size, horizon, self.observation_dim)
 
-        return self.p_sample_loop(shape, cond, **sample_kwargs)
+        return self.p_sample_loop(shape, cond, returns=returns)
 
     #------------------------------------------ training ------------------------------------------#
 
@@ -245,18 +245,16 @@ class GaussianInvDynDiffusion(nn.Module):
 
         return sample
 
-    def p_losses(self, x_start, cond, t):
+    def p_losses(self, x_start, cond, returns, t):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
-        # TODO: change this line for classifier-free guidance: implement the L function at the bottom of page (6)
-        # (with probability p, drop the conditioning information, and otherwise incorporate it)
         # NOTE: this dropping out of the conditioning information is handled by the noise model in temporal.py (this is use_dropout=True)
 
         # With some probability, drop out the class conditioning 
-        x_recon = self.model(x_noisy, cond, t, use_dropout=True) 
+        x_recon = self.model(x_noisy, cond, t, use_dropout=True, returns=returns) 
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
@@ -268,7 +266,7 @@ class GaussianInvDynDiffusion(nn.Module):
 
         return loss, info
 
-    def loss(self, x, *args):
+    def loss(self, x, cond, returns):
         # From printing out from the train.py script, it looks like the shape of x
         # is (batch_dim, num_steps_in_trajectory, action_dim +)
         # TODO: Assert this belief LOL
@@ -289,7 +287,7 @@ class GaussianInvDynDiffusion(nn.Module):
         concat_states = torch.cat((flattened_states[:(num_states - 1), :], flattened_states[1:, :]), dim=1)
 
         # Need to change the input to p_losses to be only states, *not* both states+actions
-        reverse_diffusion_loss, info = self.p_losses(states, *args, t)
+        reverse_diffusion_loss, info = self.p_losses(states, cond, returns, t)
 
         # Extract the actions out of the dataset
         inv_dyn_target = x[:, :, :self.action_dim].flatten(0, 1)[:(num_states - 1), :]
