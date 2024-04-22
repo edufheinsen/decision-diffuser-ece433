@@ -8,6 +8,7 @@ from collections import namedtuple
 import numpy as np
 import torch
 from torch import nn
+import torch.nn.functional as F
 import pdb
 
 import diffuser.utils as utils
@@ -246,10 +247,34 @@ class GaussianDiffusion(nn.Module):
         return loss, info
 
     def loss(self, x, *args):
+        # From printing out from the train.py script, it looks like the shape of x
+        # is (batch_dim, num_steps_in_trajectory, obs_dim + action_dim)
+        # TODO: Assert this belief LOL
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
-        # TODO: Add inverse dynamics loss 
-        return self.p_losses(x, *args, t)
+
+        # Need to incorporate the second addend from the L(theta, phi)
+        # equation at the bottom of page 6 of Ajay et al.'s paper
+
+        # This will require some reshaping magic: "the inverse dynamics is trained
+        # with individual transitions rather than trajectories"
+
+        # Extract (s_t, s_{t+1}) pairs out of the dataset
+        states = x[:, :, :self.observation_dim]
+        # Need to change the x that is input to p_losses to be only states, *not* both states+actions
+        reverse_diffusion_loss, info = self.p_losses(states, *args, t)
+
+        flattened_states = torch.flatten(states, 0, 1)
+        num_states = len(flattened_states)
+        concat_states = torch.cat((flattened_states[:(num_states - 1), :], flattened_states[1:, :]), dim=1)
+        # Extract the actions out of the dataset
+        inv_dyn_target = x[:, :, -self.action_dim:].flatten(0, 1)[:(num_states - 1), :]
+        # Run the inverse dynamics model, get the MSE loss
+        inv_dyn_input = self.inv_dyn_model(concat_states)
+        inv_dyn_loss = F.mse_loss(inv_dyn_input, inv_dyn_target)
+
+        # return info because the rest of the code will expect two outputs from this function
+        return (reverse_diffusion_loss + inv_dyn_loss), info 
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)
