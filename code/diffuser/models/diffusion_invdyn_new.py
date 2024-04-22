@@ -50,6 +50,7 @@ def make_timesteps(batch_size, i, device):
 
 class GaussianInvDynDiffusion(nn.Module):
     # TODO: Take in the same arguments as in Ajay et al.'s repo
+    # TODO: pass the returns everywhere
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
@@ -246,7 +247,10 @@ class GaussianInvDynDiffusion(nn.Module):
 
         # TODO: change this line for classifier-free guidance: implement the L function at the bottom of page (6)
         # (with probability p, drop the conditioning information, and otherwise incorporate it)
-        x_recon = self.model(x_noisy, cond, t)
+
+        # With probability p, drop out the class conditioning 
+        p = 0.2 # ? Need to set this as Ajay et al. do
+        x_recon = self.model(x_noisy, cond, t, force_dropout=True) if torch.rand(1) < p else self.model(x_noisy, cond, t, use_dropout=False)
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
