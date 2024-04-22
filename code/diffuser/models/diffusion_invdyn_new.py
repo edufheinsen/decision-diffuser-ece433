@@ -270,7 +270,7 @@ class GaussianInvDynDiffusion(nn.Module):
 
     def loss(self, x, *args):
         # From printing out from the train.py script, it looks like the shape of x
-        # is (batch_dim, num_steps_in_trajectory, obs_dim + action_dim)
+        # is (batch_dim, num_steps_in_trajectory, action_dim +)
         # TODO: Assert this belief LOL
         batch_size = len(x)
         t = torch.randint(0, self.n_timesteps, (batch_size,), device=x.device).long()
@@ -283,7 +283,7 @@ class GaussianInvDynDiffusion(nn.Module):
         # batch of trajectories
 
         # Extract (s_t, s_{t+1}) pairs out of the dataset
-        states = x[:, :, :self.observation_dim]
+        states = x[:, :, -self.observation_dim:]
         flattened_states = torch.flatten(states, 0, 1)
         num_states = len(flattened_states)
         concat_states = torch.cat((flattened_states[:(num_states - 1), :], flattened_states[1:, :]), dim=1)
@@ -292,7 +292,7 @@ class GaussianInvDynDiffusion(nn.Module):
         reverse_diffusion_loss, info = self.p_losses(states, *args, t)
 
         # Extract the actions out of the dataset
-        inv_dyn_target = x[:, :, -self.action_dim:].flatten(0, 1)[:(num_states - 1), :]
+        inv_dyn_target = x[:, :, :self.action_dim].flatten(0, 1)[:(num_states - 1), :]
 
         # Run the inverse dynamics model, get the MSE loss
         inv_dyn_input = self.inv_dyn_model(concat_states)
