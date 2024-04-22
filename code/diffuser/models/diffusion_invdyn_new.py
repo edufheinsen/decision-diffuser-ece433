@@ -47,13 +47,13 @@ def make_timesteps(batch_size, i, device):
     t = torch.full((batch_size,), i, device=device, dtype=torch.long)
     return t
 
-
 class GaussianInvDynDiffusion(nn.Module):
     # TODO: Take in the same arguments as in Ajay et al.'s repo
     # TODO: pass the returns everywhere
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
-        loss_type='l1', clip_denoised=False, predict_epsilon=True,
-        action_weight=1.0, loss_discount=1.0, loss_weights=None,
+        loss_type='l1', clip_denoised=False, predict_epsilon=True, hidden_dim=256,
+        action_weight=1.0, loss_discount=1.0, loss_weights=None, returns_condition=False,
+        condition_guidance_w=0.1, ar_inv=False, train_only_inv=False
     ):
         super().__init__()
         self.horizon = horizon
@@ -61,21 +61,29 @@ class GaussianInvDynDiffusion(nn.Module):
         self.action_dim = action_dim
         self.transition_dim = observation_dim + action_dim
         self.model = model
+
+        # Set all the instance variables Ajay et al. use
+        self.hidden_dim = hidden_dim
+        self.action_weight = action_weight
+        self.loss_discount = loss_discount 
+        self.loss_weights = loss_weights 
+        self.returns_condition=returns_condition 
+        self.condition_guidance_w = condition_guidance_w
+        self.ar_inv = ar_inv 
+        self.train_only_inv = train_only_inv
         
         # Adding Inverse Dynamics
         # Model takes in two states (s_t, s_{t+1}) and outputs the action 
         # that led from s_t to s_{t+1}
         # From the paper: "We represent the inverse dynamics fϕ with a 2-layered 
         # MLP with 512 hidden units and ReLU activations"
-
-        hidden_size = 256 # Assume there are two hidden layers, each with 256 neurons
         
         self.inv_dyn_model = nn.Sequential(
-            nn.Linear(2*observation_dim, hidden_size),
+            nn.Linear(2*observation_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_size, action_dim),
+            nn.Linear(hidden_dim, action_dim),
         )
 
         betas = cosine_beta_schedule(n_timesteps)
@@ -172,9 +180,7 @@ class GaussianInvDynDiffusion(nn.Module):
         # Modify sampling for classifier-free guidance: Equation (6) in the original
         # CFG paper (https://openreview.net/pdf?id=qw8AKxfYbI)
 
-        weight = 0.5 # ? need to set correctly/as Ajay et al. do
-
-        noise = (1 + weight) * self.model(x, cond, t, use_dropout=False, returns=returns) - weight * self.model(x, cond, t, force_dropout=True, returns=returns)
+        noise = (1 + self.condition_guidance_w) * self.model(x, cond, t, use_dropout=False, returns=returns) - self.condition_guidance_w * self.model(x, cond, t, force_dropout=True, returns=returns)
 
         x_recon = self.predict_start_from_noise(x, t=t, noise=noise)
 
@@ -247,10 +253,10 @@ class GaussianInvDynDiffusion(nn.Module):
 
         # TODO: change this line for classifier-free guidance: implement the L function at the bottom of page (6)
         # (with probability p, drop the conditioning information, and otherwise incorporate it)
+        # NOTE: this dropping out of the conditioning information is handled by the noise model in temporal.py (this is use_dropout=True)
 
-        # With probability p, drop out the class conditioning 
-        p = 0.2 # ? Need to set this as Ajay et al. do
-        x_recon = self.model(x_noisy, cond, t, force_dropout=True) if torch.rand(1) < p else self.model(x_noisy, cond, t, use_dropout=False)
+        # With some probability, drop out the class conditioning 
+        x_recon = self.model(x_noisy, cond, t, use_dropout=True) 
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
         assert noise.shape == x_recon.shape
@@ -293,7 +299,7 @@ class GaussianInvDynDiffusion(nn.Module):
         inv_dyn_loss = F.mse_loss(inv_dyn_input, inv_dyn_target)
 
         # return info because the rest of the code will expect two outputs from this function
-        return (reverse_diffusion_loss + inv_dyn_loss), info 
+        return (reverse_diffusion_loss + inv_dyn_loss)/2, info 
 
     def forward(self, cond, *args, **kwargs):
         return self.conditional_sample(cond, *args, **kwargs)
