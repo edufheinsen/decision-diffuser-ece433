@@ -48,7 +48,8 @@ def make_timesteps(batch_size, i, device):
     return t
 
 
-class GaussianDiffusion(nn.Module):
+class GaussianInvDynDiffusion(nn.Module):
+    # TODO: Take in the same arguments as in Ajay et al.'s repo
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
         loss_type='l1', clip_denoised=False, predict_epsilon=True,
         action_weight=1.0, loss_discount=1.0, loss_weights=None,
@@ -166,8 +167,15 @@ class GaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, x, cond, t):
-        x_recon = self.predict_start_from_noise(x, t=t, noise=self.model(x, cond, t))
+    def p_mean_variance(self, x, cond, t, returns):
+        # Modify sampling for classifier-free guidance: Equation (6) in the original
+        # CFG paper (https://openreview.net/pdf?id=qw8AKxfYbI)
+
+        weight = 0.5 # ? need to set correctly/as Ajay et al. do
+
+        noise = (1 + weight) * self.model(x, cond, t, use_dropout=False, returns=returns) - weight * self.model(x, cond, t, force_dropout=True, returns=returns)
+
+        x_recon = self.predict_start_from_noise(x, t=t, noise=noise)
 
         if self.clip_denoised:
             x_recon.clamp_(-1., 1.)
@@ -211,7 +219,9 @@ class GaussianDiffusion(nn.Module):
         device = self.betas.device
         batch_size = len(cond[0])
         horizon = horizon or self.horizon
-        shape = (batch_size, horizon, self.transition_dim)
+        # It looks like this should be changed to be just observation_dim (since we're diffusing only over states)
+        # shape = (batch_size, horizon, self.transition_dim)
+        shape = (batch_size, horizon, self.observation_dim)
 
         return self.p_sample_loop(shape, cond, **sample_kwargs)
 
@@ -234,6 +244,8 @@ class GaussianDiffusion(nn.Module):
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
 
+        # TODO: change this line for classifier-free guidance: implement the L function at the bottom of page (6)
+        # (with probability p, drop the conditioning information, and otherwise incorporate it)
         x_recon = self.model(x_noisy, cond, t)
         x_recon = apply_conditioning(x_recon, cond, self.action_dim)
 
@@ -256,19 +268,22 @@ class GaussianDiffusion(nn.Module):
         # Need to incorporate the second addend from the L(theta, phi)
         # equation at the bottom of page 6 of Ajay et al.'s paper
 
-        # This will require some reshaping magic: "the inverse dynamics is trained
-        # with individual transitions rather than trajectories"
+        # This will require some reshaping magic, since "the inverse dynamics is trained
+        # with individual transitions rather than trajectories", but x seems to be a
+        # batch of trajectories
 
         # Extract (s_t, s_{t+1}) pairs out of the dataset
         states = x[:, :, :self.observation_dim]
-        # Need to change the x that is input to p_losses to be only states, *not* both states+actions
-        reverse_diffusion_loss, info = self.p_losses(states, *args, t)
-
         flattened_states = torch.flatten(states, 0, 1)
         num_states = len(flattened_states)
         concat_states = torch.cat((flattened_states[:(num_states - 1), :], flattened_states[1:, :]), dim=1)
+
+        # Need to change the input to p_losses to be only states, *not* both states+actions
+        reverse_diffusion_loss, info = self.p_losses(states, *args, t)
+
         # Extract the actions out of the dataset
         inv_dyn_target = x[:, :, -self.action_dim:].flatten(0, 1)[:(num_states - 1), :]
+
         # Run the inverse dynamics model, get the MSE loss
         inv_dyn_input = self.inv_dyn_model(concat_states)
         inv_dyn_loss = F.mse_loss(inv_dyn_input, inv_dyn_target)
