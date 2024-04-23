@@ -148,7 +148,7 @@ def evaluate(**deps):
         samples = trainer.ema_model.conditional_sample(conditions, returns=returns)
         obs_comb = torch.cat([samples[:, 0, :], samples[:, 1, :]], dim=-1)
         obs_comb = obs_comb.reshape(-1, 2*observation_dim)
-        action = trainer.ema_model.inv_model(obs_comb)
+        action = trainer.ema_model.inv_dyn_model(obs_comb)
 
         samples = to_np(samples)
         action = to_np(action)
