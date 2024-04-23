@@ -32,8 +32,8 @@ def default_sample_fn(model, x, cond, returns, t):
     noise = torch.randn_like(x)
     noise[t == 0] = 0
 
-    values = torch.zeros(len(x), device=x.device)
-    return model_mean + model_std * noise, values
+    # values = torch.zeros(len(x), device=x.device)
+    return model_mean + model_std * noise
 
 
 def sort_by_values(x, values):
@@ -51,7 +51,7 @@ class GaussianInvDynDiffusion(nn.Module):
     # TODO: Take in the same arguments as in Ajay et al.'s repo
     # TODO: pass the returns everywhere
     def __init__(self, model, horizon, observation_dim, action_dim, n_timesteps=1000,
-        loss_type='l1', clip_denoised=False, predict_epsilon=True, hidden_dim=256,
+        loss_type='state_l2', clip_denoised=False, predict_epsilon=True, hidden_dim=256,
         action_weight=1.0, loss_discount=1.0, loss_weights=None, returns_condition=True,
         condition_guidance_w=0.1, ar_inv=False, train_only_inv=False
     ):
@@ -62,7 +62,7 @@ class GaussianInvDynDiffusion(nn.Module):
         self.transition_dim = observation_dim + action_dim
         self.model = model
 
-        # Set all the instance variables Ajay et al. use (these aren't actually necessary at the moment, but we need the training script to run)
+        # Set all the instance variables Ajay et al. use (most of these aren't actually necessary at the moment, but we need the training script to run)
         self.hidden_dim = hidden_dim
         self.action_weight = action_weight
         self.loss_discount = loss_discount 
@@ -121,7 +121,7 @@ class GaussianInvDynDiffusion(nn.Module):
 
         ## get loss coefficients and initialize objective
         loss_weights = self.get_loss_weights(action_weight, loss_discount, loss_weights)
-        self.loss_fn = Losses[loss_type](loss_weights, self.action_dim)
+        self.loss_fn = Losses['state_l2'](loss_weights)
 
     def get_loss_weights(self, action_weight, discount, weights_dict):
         '''
@@ -134,14 +134,7 @@ class GaussianInvDynDiffusion(nn.Module):
             weights_dict    : dict
                 { i: c } multiplies dimension i of observation loss by c
         '''
-        self.action_weight = action_weight
-
-        dim_weights = torch.ones(self.transition_dim, dtype=torch.float32)
-
-        ## set loss coefficients for dimensions of observation
-        if weights_dict is None: weights_dict = {}
-        for ind, w in weights_dict.items():
-            dim_weights[self.action_dim + ind] *= w
+        dim_weights = torch.ones(self.observation_dim, dtype=torch.float32)
 
         ## decay loss with trajectory timestep: discount**t
         discounts = discount ** torch.arange(self.horizon, dtype=torch.float)
@@ -149,7 +142,7 @@ class GaussianInvDynDiffusion(nn.Module):
         loss_weights = torch.einsum('h,t->ht', discounts, dim_weights)
 
         ## manually set a0 weight
-        loss_weights[0, :self.action_dim] = action_weight
+        loss_weights[0, :] = 0
         return loss_weights
 
     #------------------------------------------ sampling ------------------------------------------#
@@ -249,13 +242,13 @@ class GaussianInvDynDiffusion(nn.Module):
         noise = torch.randn_like(x_start)
 
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
-        x_noisy = apply_conditioning(x_noisy, cond, self.action_dim)
+        x_noisy = apply_conditioning(x_noisy, cond, 0)
 
         # NOTE: this dropping out of the conditioning information is handled by the noise model in temporal.py (this is use_dropout=True)
 
         # With some probability, drop out the class conditioning 
         x_recon = self.model(x_noisy, cond, t, use_dropout=True, returns=returns) 
-        x_recon = apply_conditioning(x_recon, cond, self.action_dim)
+        x_recon = apply_conditioning(x_recon, cond, 0)
 
         assert noise.shape == x_recon.shape
 
