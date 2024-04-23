@@ -29,7 +29,8 @@ def default_sample_fn(model, x, cond, returns, t):
     model_std = torch.exp(0.5 * model_log_variance)
 
     # no noise when t == 0
-    noise = torch.randn_like(x)
+    alpha = 0.5
+    noise = alpha * torch.randn_like(x)
     noise[t == 0] = 0
 
     # values = torch.zeros(len(x), device=x.device)
@@ -189,9 +190,10 @@ class GaussianInvDynDiffusion(nn.Module):
     @torch.no_grad()
     def p_sample_loop(self, shape, cond, verbose=True, return_chain=False, sample_fn=default_sample_fn, returns=None):
         device = self.betas.device
-
         batch_size = shape[0]
-        x = torch.randn(shape, device=device)
+
+        alpha = 0.5 # for low-temperature sampling
+        x = alpha * torch.randn(shape, device=device)
         x = apply_conditioning(x, cond, 0) # TODO: figure out why this argument is set to zero and not action_dim in the original codebase
 
         # chain = [x] if return_chain else None
@@ -205,7 +207,7 @@ class GaussianInvDynDiffusion(nn.Module):
             progress.update({'t': i})
             # if return_chain: chain.append(x)
 
-        progress.stamp()
+        progress.close()
 
         # x, values = sort_by_values(x, values)
         # if return_chain: chain = torch.stack(chain, dim=1)
