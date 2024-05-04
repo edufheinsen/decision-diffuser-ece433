@@ -13,10 +13,26 @@ with Sweep(RUN, Config) as sweep:
     Config.n_diffusion_steps = 200
     Config.condition_dropout = 0.25
     Config.diffusion = 'models.GaussianInvDynDiffusion'
+    # TODO: EVERYONE, CHANGE eduardof TO YOUR NETID
+    Config.bucket = '/home/eduardof/weights'
 
     with sweep.product:
         Config.n_train_steps = [1e6]
+        # Config.dataset = ['hopper-medium-v2'] 
         Config.dataset = ['hopper-medium-expert-v2']
+        # Config.dataset = ['hopper-medium-replay-v2']
+
+        # TODO: KEVIN, UNCOMMENT EACH OF THE FOLLOWING LINES FOR YOUR 3 DIFFERENT JOBS
+        # Config.dataset = ['halfcheetah-medium-expert-v2'] 
+        # Config.dataset = ['halfcheetah-medium-v2'],
+        # Config.dataset = ['halfcheetah-medium-replay-v2']
+
+        # TODO: JOIE< UNCOMMENT EACH OF THE FOLLOWING LINES FOR YOUR 3 DIFFERENT JOBS
+        # Config.dataset = ['walker2d-medium-expert-v2']
+        # Config.dataset = ['walker2d-medium-v2'] 
+        # Config.dataset = ['walker2d-medium-replay-v2']
+
+        # Config.returns_scale = [100.0]
         Config.returns_scale = [400.0]
 
 @sweep.each
