@@ -18,8 +18,8 @@ with Sweep(RUN, Config) as sweep:
 
     with sweep.product:
         Config.n_train_steps = [1e6]
-        # Config.dataset = ['hopper-medium-v2'] 
         Config.dataset = ['hopper-medium-expert-v2']
+        # Config.dataset = ['hopper-medium-v2'] 
         # Config.dataset = ['hopper-medium-replay-v2']
 
         # TODO: KEVIN, UNCOMMENT EACH OF THE FOLLOWING LINES FOR YOUR 3 DIFFERENT JOBS

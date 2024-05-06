@@ -156,7 +156,8 @@ class Trainer(object):
         data = {
             'step': self.step,
             'model': self.model.state_dict(),
-            'ema': self.ema_model.state_dict()
+            'ema': self.ema_model.state_dict(),
+            'optim': self.optimizer.state_dict()
         }
         savepath = os.path.join(self.bucket, logger.prefix, 'checkpoint')
         os.makedirs(savepath, exist_ok=True)
